@@ -11,35 +11,42 @@
 #include <math.h>
 #include "cmsis_os.h"
 #include "main_frame.h"
-#include "ff.h"
-#include "ff_gen_drv.h"
-#include "sd_diskio_dma_rtos.h"
 #include "ethernetif.h"
 #include "lwip/netif.h"
 #include "lwip/tcpip.h"
 #include "app_ethernet.h"
 #include "httpserver-netconn.h"
+#include "SDApp.h"
+#include "sd_diskio_dma_rtos.h"
+#include "usbh_diskio_dma.h"
+#include "waveplayer.h"
 
 static void SystemClock_Config(void);
 void Bk_Task(void const *args);
-void GUI_Task(void const *args);
-void SD_Task(void const *args);
+void Main_Task(void const *args);
 static void MPU_Config(void);
-static void ReadOutProtection();
+static void ReadOutProtection(void);
 static void Netif_Config(void);
 static void CPU_CACHE_Enable(void);
 void TouchUpdate(void);
 
-#define RTOS_DTM_SECTION_SIZE 40 * 1024
-#define BK_TASK_STACK_SIZE 1024 * 2
-#define GUI_TASK_STACK_SIZE 1024 * 2
-#define SD_TASK_STACK_SIZE 1024
+static void USBH_UserProcess(USBH_HandleTypeDef * phost, uint8_t id);
 
-TaskHandle_t bkTaskHandle, guiTaskHandle, sdTaskHandle;
+#define RTOS_DTM_SECTION_SIZE 34 * 1024
+#define BK_TASK_STACK_SIZE 400
+#define MAIN_TASK_STACK_SIZE 750
+#define SD_TASK_STACK_SIZE 300
+
+TaskHandle_t bkTaskHandle, guiTaskHandle, sdTaskHandle, audioTaskHandle;
 TaskStatus_t xTaskStatus, xTaskStatus1, xTaskStatus2;
 
+#if defined ( __CC_ARM   )
+uint8_t ucHeap[ RTOS_DTM_SECTION_SIZE ] __attribute__((at(0x20000000)));
+uint8_t ucHeap2[ configTOTAL_HEAP_SIZE - RTOS_DTM_SECTION_SIZE ]  __attribute__((at(0x20010000)));
+#elif defined ( __GNUC__ ) /*!< GNU Compiler */
 uint8_t ucHeap[ RTOS_DTM_SECTION_SIZE ] __attribute__((section(".DTCMSection")));
-uint8_t ucHeap2[ configTOTAL_HEAP_SIZE - RTOS_DTM_SECTION_SIZE ];
+uint8_t ucHeap2[ configTOTAL_HEAP_SIZE - RTOS_DTM_SECTION_SIZE ] __attribute__((section(".RAMSection")));
+#endif
 
 const HeapRegion_t xHeapRegions[] ={
 { ucHeap, RTOS_DTM_SECTION_SIZE },
@@ -47,36 +54,40 @@ const HeapRegion_t xHeapRegions[] ={
 { NULL,               0         }  /* Marks the end of the array. */
 };
 
-uint8_t *sdramData;
-extern LTDC_HandleTypeDef hltdc;  
-
-__IO uint32_t uwVolume = 70;
-
-uint8_t retSD;    /* Return value for SD */
-char SDPath[4] = "0:/";   /* SD logical drive path */
-FATFS SDFatFS;    /* File system object for SD logical drive */
-// uint8_t workBuffer[2 * _MAX_SS];
-
-FIL logFile;
-FIL testFile;
-char wstr[] = "Hello World";
-char rstr[50];
-char tmpstr[50];
-
-uint16_t audioBuffer[1024];
+volatile uint32_t *sdramData;
+volatile uint32_t* lcdData;
+extern LTDC_HandleTypeDef hltdc;
 
 struct netif gnetif; /* network interface structure */
 
 WM_HWIN frameMain;
 MULTIEDIT_HANDLE editLog;
 TEXT_Handle textStatus;
+TEXT_Handle textAudioStatus;
 
-#define ID_MAIN_EDITLOG     12861
-#define ID_MAIN_TEXTSTATUS  12862
+char tmpstr[50];
 
-uint8_t sdAppliState;
-uint8_t sdAppliReq;
-uint8_t sdIsMounted;
+#define ID_MAIN_EDITLOG         12861
+#define ID_MAIN_TEXTSTATUS      12862
+#define ID_MAIN_TEXTAUDIOSTATUS 12863
+
+USBH_HandleTypeDef hUSBHost;
+FATFS USBH_fatfs;
+char USBDISKPath[4];            /* USB Host logical drive path */
+
+extern uint8_t sdAppliState;
+extern uint8_t sdAppliReq;
+extern uint8_t sdIsMounted;
+
+extern FIL logFile;
+extern FIL testFile;
+extern char wstr[];
+extern char rstr[50];
+
+extern uint8_t retSD;    /* Return value for SD */
+extern char SDPath[4];   /* SD logical drive path */
+extern FATFS SDFatFS;    /* File system object for SD logical drive */
+// extern uint8_t workBuffer[2 * _MAX_SS];
 
 /**
 * @brief  Main program
@@ -89,22 +100,6 @@ int main(void)
   MPU_Config();
 
   CPU_CACHE_Enable();
-
-  /* Invalidate I-Cache : ICIALLU register */
-  // SCB_InvalidateICache();
-
-  // /* Enable branch prediction */
-  // SCB->CCR |= (1 <<18);
-  // __DSB();
-
-  // /* Invalidate I-Cache : ICIALLU register */
-  // SCB_InvalidateICache();
-
-  // /* Enable I-Cache */
-  // SCB_EnableICache();
-
-  // SCB_InvalidateDCache();
-  // SCB_EnableDCache();
 
   /* STM32F7xx HAL library initialization:
   - Configure the Flash ART accelerator on ITCM interface
@@ -121,9 +116,9 @@ int main(void)
 
   vPortDefineHeapRegions(xHeapRegions);
 
-  // ReadOutProtection();
+//  ReadOutProtection();
 
-  xTaskCreate(Bk_Task, "Bk Task", BK_TASK_STACK_SIZE, 
+  xTaskCreate((TaskFunction_t) Bk_Task, "Bk Task", BK_TASK_STACK_SIZE, 
             (void *) NULL, tskIDLE_PRIORITY, 
             &bkTaskHandle);
 
@@ -138,7 +133,7 @@ void Bk_Task(void const *args)
   /* Initialize the SDRAM */
   BSP_SDRAM_Init();
 
-  sdramData = SDRAM_DEVICE_ADDR;
+  sdramData = (uint32_t *) SDRAM_DEVICE_ADDR;
   
   /* Initialize the Touch screen */
   BSP_TS_Init(420, 272);
@@ -160,20 +155,18 @@ void Bk_Task(void const *args)
   // BSP_LCD_Clear(LCD_COLOR_BLACK);
   // BSP_LCD_DisplayStringAtLine(2, " Hello World !!!");
 
-  xTaskCreate(GUI_Task, "GUI Task", GUI_TASK_STACK_SIZE, 
+  xTaskCreate((TaskFunction_t) Main_Task, "Main Task", MAIN_TASK_STACK_SIZE, 
             (void *) NULL, tskIDLE_PRIORITY, 
             &guiTaskHandle);
 
-  BSP_AUDIO_OUT_Init(OUTPUT_DEVICE_AUTO, uwVolume, I2S_AUDIOFREQ_48K);
+ /* Init Host Library */
+  USBH_Init(&hUSBHost, USBH_UserProcess, 0);
 
-  memset(audioBuffer, 0, 1024);
+  /* Add Supported Class */
+  USBH_RegisterClass(&hUSBHost, USBH_MSC_CLASS);
 
-  for (int i = 1; i < 1024; ++i)
-  {
-    audioBuffer[i] = sin(i * 3.14159f / 2048.0f) * 5000;
-  }
-
-  BSP_AUDIO_OUT_Play(audioBuffer, 1024 * sizeof(uint16_t));
+  /* Start Host Process */
+  USBH_Start(&hUSBHost);
 
   sdAppliState = SD_APP_NO_SD;
   sdIsMounted = 0;
@@ -181,32 +174,31 @@ void Bk_Task(void const *args)
 
   FATFS_LinkDriver(&SD_Driver, SDPath);
 
-  BSP_SD_IsDetected();
-  vTaskDelay(100);
-
-  xTaskCreate(SD_Task, "SD Task", SD_TASK_STACK_SIZE, 
+  xTaskCreate((TaskFunction_t) SD_Task, "SD Task", SD_TASK_STACK_SIZE, 
             (void *) NULL, 1, 
             &sdTaskHandle);
+
+  BSP_SD_IsDetected();
+  vTaskDelay(100);
 
   while (1) 
   {
     BSP_LED_Toggle(LED1);
 
-    vTaskDelay(30);
+    AUDIO_PLAYER_Process();
+
+    vTaskDelay(50);
   }
 }
 
-void GUI_Task(void const *args) 
+void Main_Task(void const *args) 
 {
-  char tmpstr[50];
-  uint32_t i;
-  uint32_t* lcdData;
-  lcdData = LCD_FB_START_ADDRESS;
+  lcdData = (uint32_t *) LCD_FB_START_ADDRESS;
 
    // Initialize emWin GUI 
   GUI_Init();  
 
-  HAL_LTDC_SetAlpha(&hltdc, 200, 0);
+  // HAL_LTDC_SetAlpha(&hltdc, 200, 0);
 
   // GUI_SetFont(&GUI_Font32_1);
 
@@ -223,9 +215,12 @@ void GUI_Task(void const *args)
   textStatus = TEXT_CreateEx(20, 252, 300, 20, frameMain, 
     WM_CF_SHOW, 0, ID_MAIN_TEXTSTATUS, "");
 
+  textAudioStatus = TEXT_CreateEx(200, 252, 300, 20, frameMain, 
+    WM_CF_SHOW, 0, ID_MAIN_TEXTAUDIOSTATUS, "");
+
   GUI_Exec();
   
-  /* Create tcp_ip stack thread */ // 169.254.85.210
+  /* Create tcp_ip stack thread */
   tcpip_init(NULL, NULL);
 
   /* Initialize the LwIP stack */
@@ -247,6 +242,12 @@ void GUI_Task(void const *args)
   TickType_t now;
   uint16_t frameCounter = 0;
 
+  xTaskCreate((TaskFunction_t) AudioTask, "Audio Task", configMINIMAL_STACK_SIZE * 2, 
+            (void *) NULL, 8, 
+            &audioTaskHandle);
+
+  AUDIO_PLAYER_Start("0:/1.wav");
+
   while (1) 
   {
     TouchUpdate();
@@ -259,19 +260,70 @@ void GUI_Task(void const *args)
     now = xTaskGetTickCount();
     if(now - fpsTimeCounter > 1000 * portTICK_RATE_MS)
     {
-      vTaskGetInfo(guiTaskHandle, &xTaskStatus, pdTRUE, eInvalid);
-      vTaskGetInfo(bkTaskHandle, &xTaskStatus1, pdTRUE, eInvalid);
-      vTaskGetInfo(sdTaskHandle, &xTaskStatus2, pdTRUE, eInvalid);
+      // vTaskGetInfo(guiTaskHandle, &xTaskStatus, pdTRUE, eInvalid);
+      // vTaskGetInfo(bkTaskHandle, &xTaskStatus1, pdTRUE, eInvalid);
+      // vTaskGetInfo(sdTaskHandle, &xTaskStatus2, pdTRUE, eInvalid);
 
-      sprintf(tmpstr, "FPS : %5.1f - G:%u-B:%u-S:%u", (float) frameCounter / 
-        (now - fpsTimeCounter) * (1000 * portTICK_RATE_MS), xTaskStatus.usStackHighWaterMark, 
-        xTaskStatus1.usStackHighWaterMark, xTaskStatus2.usStackHighWaterMark);
+      // sprintf(tmpstr, "FPS : %5.1f - M:%u-B:%u-S:%u", (float) frameCounter / 
+      //   (now - fpsTimeCounter) * (1000 * portTICK_RATE_MS), xTaskStatus.usStackHighWaterMark, 
+      //   xTaskStatus1.usStackHighWaterMark, xTaskStatus2.usStackHighWaterMark );
+
+      sprintf(tmpstr, "FPS : %.1f   ", (float) frameCounter / 
+        (now - fpsTimeCounter) * (1000 * portTICK_RATE_MS));
+
       TEXT_SetText(textStatus, tmpstr);
       frameCounter = 0;
       fpsTimeCounter = xTaskGetTickCount();
     }
 
     vTaskDelay(50);
+  }
+}
+
+
+/**
+  * @brief  User Process
+  * @param  phost: Host Handle
+  * @param  id: Host Library user message ID
+  * @retval None
+  */
+static void USBH_UserProcess(USBH_HandleTypeDef * phost, uint8_t id)
+{
+  switch (id)
+  {
+  case HOST_USER_SELECT_CONFIGURATION:
+    break;
+
+  case HOST_USER_DISCONNECTION:
+
+    if (f_mount(NULL, USBDISKPath, 0) != FR_OK)
+    {
+      __log("ERROR : Cannot DeInitialize FatFs! \n");
+    }
+    if (FATFS_UnLinkDriver(USBDISKPath) != 0)
+    {
+      __log("ERROR : Cannot UnLink FatFS Driver! \n");
+    }
+    __log("USB Disconnected");
+    break;
+
+  case HOST_USER_CLASS_ACTIVE:
+
+    break;
+
+  case HOST_USER_CONNECTION:
+    if (FATFS_LinkDriver(&USBH_Driver, USBDISKPath) == 0)
+    {
+      if (f_mount(&USBH_fatfs, USBDISKPath, 0) != FR_OK)
+      {
+        __log("ERROR : Cannot Initialize FatFs! \n");
+      }
+    }
+    __log("USB Connected");
+  break;
+
+  default:
+    break;
   }
 }
 
@@ -314,214 +366,83 @@ static void Netif_Config(void)
   }
 }
 
-void SD_Task(void const *args)
-{  
-  __IO uint8_t lastState, state, counter = 0;
-  uint8_t firstTime = 0;
 
-  while(1)
-  {
-    SD_Application();
+/**
+  * @brief  System Clock Configuration
+  *         The system Clock is configured as follow :
+  *            System Clock source            = PLL (HSE)
+  *            SYSCLK(Hz)                     = 200000000
+  *            HCLK(Hz)                       = 200000000
+  *            AHB Prescaler                  = 1
+  *            APB1 Prescaler                 = 4
+  *            APB2 Prescaler                 = 2
+  *            HSE Frequency(Hz)              = 25000000
+  *            PLL_M                          = 25
+  *            PLL_N                          = 400
+  *            PLL_P                          = 2
+  *            PLLSAI_N                       = 384
+  *            PLLSAI_P                       = 8
+  *            VDD(V)                         = 3.3
+  *            Main regulator output voltage  = Scale1 mode
+  *            Flash Latency(WS)              = 7
+  * @param  None
+  * @retval None
+  */
+// void SystemClock_Config(void)
+// {
+//   RCC_ClkInitTypeDef RCC_ClkInitStruct;
+//   RCC_OscInitTypeDef RCC_OscInitStruct;
+//   RCC_PeriphCLKInitTypeDef PeriphClkInitStruct;
 
-    state = BSP_SD_IsDetected();
+//   /* Enable HSE Oscillator and activate PLL with HSE as source */
+//   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+//   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+//   RCC_OscInitStruct.HSIState = RCC_HSI_OFF;
+//   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+//   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+//   RCC_OscInitStruct.PLL.PLLM = 25;
+//   RCC_OscInitStruct.PLL.PLLN = 400;
+//   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+//   RCC_OscInitStruct.PLL.PLLQ = 8;
 
-    if (lastState != state)
-    {
-      counter = 0;
-    }
+//   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+//   {
+//     while(1) { ; }
+//   }
 
-    if (sdAppliState == SD_APP_NO_SD && counter > 4 && state == 1)
-    {
-      sdAppliState = SD_APP_MOUNT;
-      counter = 250;
-      firstTime = 1;
-      __log("SD Card Inserted");
-    }
+//   /* Activate the OverDrive to reach the 200 Mhz Frequency */
+//   if (HAL_PWREx_EnableOverDrive() != HAL_OK)
+//   {
+//     while(1) { ; }
+//   }
 
-    if (sdAppliState == SD_APP_MOUNT && sdAppliState == SD_APP_READY && 
-      sdAppliState == SD_APP_START && counter > 4 && state == 0)
-    {
-      sdAppliState = SD_APP_ERR;
-    }
+//   /* Select PLLSAI output as USB clock source */
+//   PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_CLK48;
+//   PeriphClkInitStruct.Clk48ClockSelection = RCC_CLK48SOURCE_PLLSAIP;
+//   PeriphClkInitStruct.PLLSAI.PLLSAIN = 192;
+//   PeriphClkInitStruct.PLLSAI.PLLSAIQ = 4;
+//   PeriphClkInitStruct.PLLSAI.PLLSAIP = RCC_PLLSAIP_DIV4;
 
-    if(state == 0)
-    {
-      if (lastState == state && counter != 250)
-        counter++;
+//   if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
+//   {
+//     while(1) { ; }
+//   }
 
-      if (counter > 4 && counter != 250)
-      {
-        sdAppliState = SD_APP_NO_SD;
-        counter = 250;
-        if (firstTime == 0)
-        {
-          __log("No SD Found");
-          firstTime = 1;
-        }
-        else
-        {
-          __log("SD Card Ejected");
-        }
-      }
-    }
-    else
-    {
-      if (lastState == state && counter != 250)
-        counter++;
-      if (counter > 4 && counter != 250)
-      {
-        sdAppliState = SD_APP_MOUNT;
-        counter = 250;
-        firstTime = 1;
-        __log("SD Card Inserted");
-      }
-    }
+//   /* Select PLL as system clock source and configure the HCLK, PCLK1 and PCLK2
+//    * clocks dividers */
+//   RCC_ClkInitStruct.ClockType = (RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_HCLK |
+//                                  RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2);
+//   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+//   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
+//   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
+//   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
-    if (sdAppliReq != 0)
-    {
-      if (state == 1)
-      {
-        sdAppliState = SD_APP_START;
-        sdAppliReq = 0;
-      }
-    }
+//   if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_6) != HAL_OK)
+//   {
+//     while(1) { ; }
+//   }
+// }
 
-    lastState = state;
-
-    vTaskDelay(50);
-  }
-}
-
-void SD_Application()
-{
-  int i;
-
-  switch(sdAppliState)
-  {
-    case SD_APP_MOUNT:
-
-      if (sdIsMounted == 0)
-      {
-        retSD = f_mount(&SDFatFS, "0:/", 1);
-        sdAppliState = SD_APP_START;
-        sdIsMounted = 1;
-        __log("Mounted");
-      }
-      else
-      {
-        f_mount(0, "0:/", 1);
-        sdIsMounted = 0;
-      }
-
-      break;
-
-    case SD_APP_START:
-
-      if (BSP_SD_IsDetected())
-      {
-        if (sdIsMounted == 1)
-        {          
-          // __log("SD Formatting");
-
-          // retSD = f_mkfs("", FM_ANY, 0, workBuffer, sizeof(workBuffer));
-
-          // if(retSD == FR_OK)
-          // {
-          //   __log("SD Formatted Succesfully");
-          // }
-          // else
-          // {
-          //   sdAppliState = SD_APP_ERR;
-          //   sprintf(rstr, "SD Format Error : %u", retSD);
-          //   __log(rstr);
-          //   return;
-          // }
-
-          f_unlink("0:/log.txt");
-          retSD = f_open(&logFile, "0:/log.txt", FA_CREATE_NEW | FA_WRITE | FA_CREATE_ALWAYS);
-
-          if(retSD == FR_OK)
-          {
-            f_write(&logFile, wstr, sizeof(wstr), &i);
-            f_close(&logFile);   
-          }       
-          else
-          {
-            sprintf(rstr, "log.txt write error : %u", retSD);
-            __log(rstr); 
-            f_close(&logFile); 
-            sdAppliState = SD_APP_ERR;
-            return;
-          }
-
-          retSD = f_open(&testFile, "0:/1.TXT", FA_OPEN_ALWAYS | FA_READ);
-
-          if(retSD == FR_OK)
-          {
-            memset(rstr, ' ', 50);
-            f_read(&testFile, rstr, 50, &i);  
-          }
-          else
-          {
-            sprintf(rstr, "1.TXT read error : %u", retSD);
-          }
-          __log(rstr); 
-          f_close(&testFile);    
-
-          retSD = f_open(&logFile, "0:/log.txt", FA_OPEN_ALWAYS | FA_READ);
-
-          if(retSD == FR_OK)
-          {
-            memset(rstr, ' ', 50);
-            f_read(&logFile, rstr, 50, &i);     
-          }
-          else
-          {
-            sprintf(rstr, "log.txt read error : %u", retSD);
-          }
-          __log(rstr);   
-          f_close(&logFile);  
-
-          sdAppliState = SD_APP_READY;
-        }
-        else
-        {
-          sdIsMounted = 0;
-          sdAppliState = SD_APP_MOUNT;
-          __log("Not Mounted");
-        }
-      }
-      else
-      {
-        sdIsMounted = 0;
-        sdAppliState = SD_APP_NO_SD;
-        __log("No SD Found");
-      }
-
-      break;
-    case SD_APP_NO_SD:
-
-      break;
-    case SD_APP_ERR:
-
-      __log("SD Card Error");
-      f_mount(0, "0:/", 1);
-      FATFS_UnLinkDriver(SDPath);
-      FATFS_LinkDriver(&SD_Driver, SDPath);
-      sdAppliState = SD_APP_NO_SD;
-      sdIsMounted = 0;
-
-      break;
-    case SD_APP_READY:
-
-      // if (BSP_SD_IsDetected())
-      // {
-      //   f_mount(0, "", 1);
-      // }
-
-      break;
-  }
-}
 
 /**
   * @brief  System Clock Configuration
@@ -565,7 +486,7 @@ static void SystemClock_Config(void)
     while(1) { ; }
   }
   
-  /* Activate the OverDrive to reach the 216 MHz Frequency */  
+  /* Activate the OverDrive to reach the 216 MHz Frequency */   
   ret = HAL_PWREx_EnableOverDrive();
   if(ret != HAL_OK)
   {
@@ -593,10 +514,20 @@ static void SystemClock_Config(void)
   */
 static void CPU_CACHE_Enable(void)
 {
+  /* Invalidate I-Cache : ICIALLU register */
+  SCB_InvalidateICache();
+
+  /* Enable branch prediction */
+  SCB->CCR |= (1 <<18);
+  __DSB();
+
+  /* Invalidate I-Cache : ICIALLU register */
+  SCB_InvalidateICache();
+
   /* Enable I-Cache */
   SCB_EnableICache();
 
-  /* Enable D-Cache */
+  SCB_InvalidateDCache();
   SCB_EnableDCache();
 }
 
@@ -612,6 +543,21 @@ static void MPU_Config(void)
   
   /* Disable the MPU */
   HAL_MPU_Disable();
+
+  /* Configure the MPU attributes for SDRAM as WT */
+  MPU_InitStruct.Enable = MPU_REGION_ENABLE;
+  MPU_InitStruct.BaseAddress = SDRAM_DEVICE_ADDR;
+  MPU_InitStruct.Size = MPU_REGION_SIZE_8MB;
+  MPU_InitStruct.AccessPermission = MPU_REGION_FULL_ACCESS;
+  MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
+  MPU_InitStruct.IsCacheable = MPU_ACCESS_CACHEABLE;
+  MPU_InitStruct.IsShareable = MPU_ACCESS_NOT_SHAREABLE;
+  MPU_InitStruct.Number = MPU_REGION_NUMBER0;
+  MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL0;
+  MPU_InitStruct.SubRegionDisable = 0x00;
+  MPU_InitStruct.DisableExec = MPU_INSTRUCTION_ACCESS_ENABLE;
+
+  HAL_MPU_ConfigRegion(&MPU_InitStruct);
   
   /* Configure the MPU as Normal Non Cacheable for Ethernet Buffers in the SRAM2 */
   MPU_InitStruct.Enable = MPU_REGION_ENABLE;
@@ -673,7 +619,7 @@ static void MPU_Config(void)
   HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
 }
 
-static void ReadOutProtection()
+static void ReadOutProtection(void)
 {
   FLASH_OBProgramInitTypeDef OB_Init;
 

@@ -1,0 +1,16 @@
+.\objects\netdb.o: ..\Middlewares\LwIP\api\netdb.c
+.\objects\netdb.o: ..\Middlewares\LwIP\include\lwip/netdb.h
+.\objects\netdb.o: ..\Middlewares\LwIP\include\lwip/opt.h
+.\objects\netdb.o: ..\App\ETH\lwipopts.h
+.\objects\netdb.o: ..\Middlewares\LwIP\include\lwip/debug.h
+.\objects\netdb.o: ..\Middlewares\LwIP\include\lwip/arch.h
+.\objects\netdb.o: ..\Middlewares\LwIP\system\arch/cc.h
+.\objects\netdb.o: ..\Middlewares\LwIP\system\arch/cpu.h
+.\objects\netdb.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdlib.h
+.\objects\netdb.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdio.h
+.\objects\netdb.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stddef.h
+.\objects\netdb.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
+.\objects\netdb.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\inttypes.h
+.\objects\netdb.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\limits.h
+.\objects\netdb.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\ctype.h
+.\objects\netdb.o: ..\Middlewares\LwIP\include\lwip/opt.h

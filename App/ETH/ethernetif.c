@@ -78,11 +78,11 @@
 #if defined ( __CC_ARM   )
 ETH_DMADescTypeDef  DMARxDscrTab[ETH_RXBUFNB] __attribute__((at(0x2004C000)));/* Ethernet Rx DMA Descriptors */
 
-ETH_DMADescTypeDef  DMATxDscrTab[ETH_TXBUFNB] __attribute__((at(0x2004C080)));/* Ethernet Tx DMA Descriptors */
+ETH_DMADescTypeDef  DMATxDscrTab[ETH_TXBUFNB] __attribute__((at(0x2004C0F0)));/* Ethernet Tx DMA Descriptors */
 
-uint8_t Rx_Buff[ETH_RXBUFNB][ETH_RX_BUF_SIZE] __attribute__((at(0x2004C100))); /* Ethernet Receive Buffers */
+uint8_t Rx_Buff[ETH_RXBUFNB][ETH_RX_BUF_SIZE] __attribute__((at(0x2004C1FE))); /* Ethernet Receive Buffers */
 
-uint8_t Tx_Buff[ETH_TXBUFNB][ETH_TX_BUF_SIZE] __attribute__((at(0x2004D8D0))); /* Ethernet Transmit Buffers */
+uint8_t Tx_Buff[ETH_TXBUFNB][ETH_TX_BUF_SIZE] __attribute__((at(0x2004E0FF))); /* Ethernet Transmit Buffers */
 
 #elif defined ( __ICCARM__ ) /*!< IAR Compiler */
   #pragma data_alignment=4 

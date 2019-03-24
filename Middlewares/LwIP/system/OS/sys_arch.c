@@ -501,4 +501,10 @@ void sys_arch_unprotect(sys_prot_t pval)
   osMutexRelease(lwip_sys_mutex);
 }
 
+err_t sys_mbox_trypost_fromisr(sys_mbox_t *q, void *msg)
+{
+    /* Quietly fail - not implemented. */
+    return ERR_MEM;
+}
+
 #endif /* !NO_SYS */

@@ -42,8 +42,10 @@ C_SOURCES = $(wildcard Drivers/CMSIS/Device/STM32F746/*.c) \
 			Utilities/CPU/cpu_utils.c \
 			$(wildcard Middlewares/FatFs/*.c) \
 			Middlewares/FatFs/drivers/sd_diskio_dma_rtos.c \
+			Middlewares/FatFs/drivers/usbh_diskio_dma.c \
 			Middlewares/FatFs/option/syscall.c \
-			Middlewares/FatFs/option/unicode.c \
+			$(wildcard Middlewares/STM32_USB_Host_Library/Core/Src/*.c) \
+			$(wildcard Middlewares/STM32_USB_Host_Library/Class/MSC/Src/*.c) \
 			$(wildcard Middlewares/LwIP/api/*.c) \
 			$(wildcard Middlewares/LwIP/core/*.c) \
 			$(wildcard Middlewares/LwIP/core/ipv4/*.c) \
@@ -53,9 +55,14 @@ C_SOURCES = $(wildcard Drivers/CMSIS/Device/STM32F746/*.c) \
 			$(wildcard App/Core/*.c) \
 			$(wildcard App/emWin/*.c) \
 			$(wildcard App/FatFs/*.c) \
+			$(wildcard App/USB_MSC/*.c) \
+			$(wildcard App/Audio/*.c) \
 			App/ETH/app_ethernet.c \
 			App/ETH/ethernetif.c \
 			App/ETH/httpserver-netconn.c
+
+			
+# 			Middlewares/FatFs/option/unicode.c \
 
 # ASM sources
 ASM_SOURCES =  \
@@ -108,7 +115,8 @@ C_DEFS =  \
 -DSTM32F746xx \
 -DUSE_STM32746G_DISCOVERY \
 -DARM_MATH_CM7 \
--D__FPU_PRESENT=1
+-D__FPU_PRESENT=1 \
+-DUSE_USB_HS
 
 
 # AS includes
@@ -126,11 +134,15 @@ C_INCLUDES =  \
 -IMiddlewares/FreeRTOS/CMSIS_RTOS \
 -IMiddlewares/FreeRTOS/include \
 -IMiddlewares/FatFs \
+-IMiddlewares/STM32_USB_Host_Library/Core/Inc \
+-IMiddlewares/STM32_USB_Host_Library/Class/MSC/Inc \
 -IMiddlewares/STemWin/inc \
 -IUtilities/CPU \
 -IApp/Core \
 -IApp/emWin \
 -IApp/FatFs \
+-IApp/USB_MSC \
+-IApp/Audio \
 -IMiddlewares/FatFs/drivers \
 -IApp/FreeRTOS \
 -IApp/ETH \
@@ -204,7 +216,7 @@ $(BUILD_DIR):
 #######################################
 clean:
 	-rm -fR $(BUILD_DIR)
-  
+
 #######################################
 # dependencies
 #######################################

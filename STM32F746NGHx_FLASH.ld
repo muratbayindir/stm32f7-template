@@ -41,6 +41,16 @@ _Min_Stack_Size = 0x460; /* required amount of stack */
 /* Specify the memory areas */
 MEMORY
 {
+/*
+FLASH (rx)       : ORIGIN = 0x08000000, LENGTH = 1024K
+DTCM (xrw)       : ORIGIN = 0x20000000, LENGTH = 0x10000-0x4000
+RAM (xrw)        : ORIGIN = 0x20010000, LENGTH = 0x40000
+Memory_B1(xrw)   : ORIGIN = 0x2000C000, LENGTH = 0xFF
+Memory_B2(xrw)   : ORIGIN = 0x2000C0FF, LENGTH = 0xFF
+Memory_B3(xrw)   : ORIGIN = 0x2000C1FE, LENGTH = 0x2000-0xFF
+Memory_B4(xrw)   : ORIGIN = 0x2000E1FE, LENGTH = 0x2000-0xFF
+*/
+
 FLASH (rx)       : ORIGIN = 0x08000000, LENGTH = 1024K
 DTCM (xrw)       : ORIGIN = 0x20000000, LENGTH = 0x10000
 RAM (xrw)        : ORIGIN = 0x20010000, LENGTH = 0x40000-0x4000
@@ -48,20 +58,7 @@ Memory_B1(xrw)   : ORIGIN = 0x2004C000, LENGTH = 0xFF
 Memory_B2(xrw)   : ORIGIN = 0x2004C0FF, LENGTH = 0xFF
 Memory_B3(xrw)   : ORIGIN = 0x2004C1FE, LENGTH = 0x2000-0xFF
 Memory_B4(xrw)   : ORIGIN = 0x2004E0FF, LENGTH = 0x2000-0xFF
-/*
-Memory_B1(xrw)   : ORIGIN = 0x20048800, LENGTH = 0xFF
-Memory_B2(xrw)   : ORIGIN = 0x200488FF, LENGTH = 0xFF
-Memory_B3(xrw)   : ORIGIN = 0x200489FE, LENGTH = 0x2000
-Memory_B4(xrw)   : ORIGIN = 0x2004A9FE, LENGTH = 0x2000
-*/
-/*
-537194656 last address
-13d0 -> 6096
-Memory_B1(xrw)   : ORIGIN = 0x2004C000, LENGTH = 0x80
-Memory_B2(xrw)   : ORIGIN = 0x2004C080, LENGTH = 0x80
-Memory_B3(xrw)   : ORIGIN = 0x2004C100, LENGTH = 0x17d0 
-Memory_B4(xrw)   : ORIGIN = 0x2004D8D0, LENGTH = 0x17d0
-*/
+
 }
 
 /* Define output sections */
@@ -184,6 +181,7 @@ SECTIONS
 
    .ARM.attributes 0 : { *(.ARM.attributes) }
   .DTCMSection : { *(.DTCMSection) } >DTCM
+  .RAMSection : { *(.RAMSection) } >RAM
   .RxDescripSection : { *(.RxDescripSection) } >Memory_B1
   .TxDescripSection : { *(.TxDescripSection) } >Memory_B2
   .RxarraySection : { *(.RxBUF) } >Memory_B3

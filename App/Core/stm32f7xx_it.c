@@ -66,6 +66,8 @@ extern ETH_HandleTypeDef EthHandle;
 extern uint8_t sdAppliState;
 extern MULTIEDIT_HANDLE editLog;
 
+extern HCD_HandleTypeDef hhcd;
+
 /* Private function prototypes -----------------------------------------------*/
 /* Private functions ---------------------------------------------------------*/
 
@@ -236,6 +238,30 @@ void DMA2_Stream6_IRQHandler(void)
 void ETH_IRQHandler(void)
 {
   HAL_ETH_IRQHandler(&EthHandle);
+}
+
+/**
+  * @brief  This function handles USB-On-The-Go FS/HS global interrupt request.
+  * @param  None
+  * @retval None
+  */
+#ifdef USE_USB_FS
+void OTG_FS_IRQHandler(void)
+#else
+void OTG_HS_IRQHandler(void)
+#endif
+{
+  HAL_HCD_IRQHandler(&hhcd);
+}
+
+/**
+  * @brief  This function handles External Line[15:10] interrupt request.
+  * @param  None
+  * @retval None
+  */
+void EXTI15_10_IRQHandler(void)
+{
+  HAL_GPIO_EXTI_IRQHandler(TAMPER_BUTTON_PIN);
 }
 
 /************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

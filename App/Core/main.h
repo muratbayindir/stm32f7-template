@@ -32,7 +32,8 @@
 #include <stdio.h>
 #include "GUI.h"
 #include "DIALOG.h"
-
+#include "usbh_core.h"
+#include "usbh_msc.h"
 
 enum SDAppliState
 {
