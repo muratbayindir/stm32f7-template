@@ -1,4 +1,5 @@
-Version 1.1
-A template for STM32F746G-DISCO discovery board
-Middlewares : Emwin, FreeRTOS, LWIP, Audio, SD Card
-Issues : USB not working , will be fixed soon
+Version 1.2
+
+A template for STM32F746G-DISCO board
+
+Middlewares : Emwin, FreeRTOS, LWIP, Audio, SD Card, USB Host MSC&HID
